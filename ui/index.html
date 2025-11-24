@@ -79,16 +79,18 @@
           <label>Reconnect Max Backoff (sec)</label>
           <input id="reconnect" type="number" min="5" value="30">
         </div>
-        <div>
-          <label>Local OpenAI API URL</label>
-          <input id="local_api_url" placeholder="http://localhost:11434">
-          <div class="hint">Used to scan /v1/models from a local provider <b>(WITHOUT /v1)</b></div>
-        </div>
-        <div>
-          <label>Local OpenAI API Key</label>
-          <input id="local_api_key" placeholder="sk-...">
-          <div class="hint">Optional, only if your local API requires it</div>
-        </div>
+      </div>
+
+      <h4 style="margin-top:20px;margin-bottom:10px">Local Endpoints</h4>
+      <table id="endpointsTable">
+        <thead><tr><th>ID</th><th>URL</th><th>Key</th><th>Actions</th></tr></thead>
+        <tbody id="endpointsBody"></tbody>
+      </table>
+      <div class="row" style="margin-top:10px;align-items:flex-end">
+        <div style="width:150px"><label>ID</label><input id="new_ep_id" placeholder="e.g. ollama"></div>
+        <div style="flex:1"><label>URL</label><input id="new_ep_url" placeholder="http://localhost:11434"></div>
+        <div style="flex:1"><label>Key</label><input id="new_ep_key" placeholder="Optional"></div>
+        <button id="btnAddEndpoint" class="btn" style="margin-top:22px">Add</button>
       </div>
     </section>
 
@@ -119,8 +121,20 @@
         <h4 id="editorTitle">New Model</h4>
         <div class="grid">
           <div>
-            <label>Name</label>
+            <label>Name (External ID)</label>
             <input id="m_name" placeholder="model-id">
+          </div>
+          <div>
+            <label>Internal ID (Optional)</label>
+            <input id="m_internal_id" placeholder="Same as Name if empty">
+          </div>
+          <div>
+            <label>Endpoint</label>
+            <select id="m_endpoint"></select>
+          </div>
+          <div style="grid-column: 1 / -1;">
+            <label>System Prompt (Optional)</label>
+            <textarea id="m_sys_prompt" rows="3" style="width:100%;margin-top:6px;padding:10px;background:#0f141d;border:1px solid var(--border);border-radius:8px;color:var(--text)"></textarea>
           </div>
           <div>
             <label>Max Completion Tokens</label>
@@ -182,12 +196,21 @@
       $('#provider').value = cfg.provider||'';
       $('#heartbeat').value = cfg.heartbeat_interval||30;
       $('#reconnect').value = cfg.reconnect_max_backoff||30;
-  $('#wsUrl').textContent = 'ws: '+ (cfg.andy_api_url? wsFrom(cfg.andy_api_url): 'ws://localhost:8080/ws');
-  // Local API fields
-  const lurl = (cfg.local_api_url||'');
-  const lkey = (cfg.local_api_key||'');
-  const elUrl = document.getElementById('local_api_url'); if(elUrl) elUrl.value = lurl;
-  const elKey = document.getElementById('local_api_key'); if(elKey) elKey.value = lkey;
+      $('#wsUrl').textContent = 'ws: '+ (cfg.andy_api_url? wsFrom(cfg.andy_api_url): 'ws://localhost:8080/ws');
+
+      // Endpoints
+      const eps = cfg.endpoints||[];
+      const epBody = $('#endpointsBody');
+      epBody.innerHTML = '';
+      eps.forEach((ep,i)=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${ep.id}</td><td>${ep.url}</td><td>${ep.api_key?'***':''}</td>
+          <td>
+            <button class="btn" data-scan-ep="${i}">Scan</button>
+            <button class="btn danger" data-del-ep="${i}">Del</button>
+          </td>`;
+        epBody.appendChild(tr);
+      });
 
       // Models
       const models = cfg.models||[];
@@ -208,30 +231,71 @@
     }
 
     // Table actions
-    document.addEventListener('click', (e)=>{
+    document.addEventListener('click', async (e)=>{
       const i = e.target.getAttribute('data-i');
       if(i!==null){ editIndex = parseInt(i); openEditor(cfg.models[editIndex]); }
       const del = e.target.getAttribute('data-del');
       if(del!==null){ const idx = parseInt(del); cfg.models.splice(idx,1); renderAll(); }
+
+      // Endpoint actions
+      const delEp = e.target.getAttribute('data-del-ep');
+      if(delEp!==null){ cfg.endpoints.splice(parseInt(delEp),1); renderAll(); }
+      
+      const scanEp = e.target.getAttribute('data-scan-ep');
+      if(scanEp!==null){
+          const ep = cfg.endpoints[parseInt(scanEp)];
+          await scanModels(ep.url, ep.api_key, ep.id);
+      }
     });
     document.addEventListener('change', (e)=>{
       const idx = e.target.getAttribute('data-enable');
       if(idx!==null){ const i = parseInt(idx); cfg.models[i].enabled = !!e.target.checked; }
     });
 
-    function openEditor(m){ $('#editorTitle').textContent = (editIndex===-1? 'New' : 'Edit') + ' Model';
+    $('#btnAddEndpoint').onclick = ()=>{
+        const id = $('#new_ep_id').value.trim();
+        const url = $('#new_ep_url').value.trim();
+        const key = $('#new_ep_key').value.trim();
+        if(!id || !url) { toast('ID and URL required'); return; }
+        cfg.endpoints = cfg.endpoints||[];
+        if(cfg.endpoints.find(e=>e.id===id)){ toast('ID already exists'); return; }
+        cfg.endpoints.push({id, url, api_key: key});
+        $('#new_ep_id').value=''; $('#new_ep_url').value=''; $('#new_ep_key').value='';
+        renderAll();
+    };
+
+    function openEditor(m){ 
+      $('#editorTitle').textContent = (editIndex===-1? 'New' : 'Edit') + ' Model';
       $('#m_name').value = m?.name||'';
+      $('#m_internal_id').value = m?.internal_id||'';
+      
+      // Populate endpoints
+      const sel = $('#m_endpoint');
+      sel.innerHTML = '';
+      (cfg.endpoints||[]).forEach(ep=>{
+          const opt = document.createElement('option');
+          opt.value = ep.id;
+          opt.textContent = ep.id + ' (' + ep.url + ')';
+          sel.appendChild(opt);
+      });
+      sel.value = m?.endpoint_id || (cfg.endpoints?.[0]?.id || '');
+
+      $('#m_sys_prompt').value = m?.system_prompt||'';
       $('#m_ctx').value = m?.max_completion_tokens||4096;
       $('#m_cc').value = m?.concurrent_connections||1;
       $('#m_embed').checked = !!m?.supports_embedding;
       $('#m_vision').checked = !!m?.supports_vision;
-      show($('#modelEditor')); }
+      show($('#modelEditor')); 
+    }
 
   // Adding is guided by scan; you can still edit scanned models below.
     $('#btnCancelModel').onclick = ()=>{ hide($('#modelEditor')); };
     $('#btnSaveModel').onclick = ()=>{
       const m = {
         name: $('#m_name').value.trim(),
+        internal_id: $('#m_internal_id').value.trim(),
+        endpoint_id: $('#m_endpoint').value,
+        system_prompt: $('#m_sys_prompt').value.trim(),
         max_completion_tokens: parseInt($('#m_ctx').value||'0'),
         concurrent_connections: parseInt($('#m_cc').value||'1'),
         supports_embedding: $('#m_embed').checked,
@@ -251,8 +315,7 @@
           provider: $('#provider').value.trim()||'provider',
           heartbeat_interval: parseInt($('#heartbeat').value||'30'),
           reconnect_max_backoff: parseInt($('#reconnect').value||'30'),
-          local_api_url: (document.getElementById('local_api_url')?.value||'').trim(),
-          local_api_key: (document.getElementById('local_api_key')?.value||'').trim(),
+          endpoints: cfg.endpoints||[],
           models: cfg.models||[],
         };
   const url = initial? '/api/save-config' : '/api/update-config';
@@ -292,18 +355,32 @@
     // Scan models from local OpenAI-compatible API via server proxy (avoids CORS)
     const scanBtn = document.getElementById('btnScanModels');
     if (scanBtn) scanBtn.addEventListener('click', async ()=>{
-      const base = (document.getElementById('local_api_url')?.value||'').trim();
-      const key  = (document.getElementById('local_api_key')?.value||'').trim();
-      if(!base){ toast('Local API URL required'); return; }
+        // Legacy scan button - maybe remove or make it scan all?
+        // For now, let's just toast
+        toast('Please use Scan button in Endpoints table');
+    });
+
+    async function scanModels(base, key, endpointId){
+      if(!base){ toast('Endpoint URL required'); return; }
       try{
         const res = await fetch('/api/scan-models', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({base_url: base, api_key: key})});
         if(!res.ok){ throw new Error(await res.text()); }
         const data = await res.json();
-        cfg.models = data.models||[];
+        const newModels = data.models||[];
+        // Merge logic: add if not exists
+        let added = 0;
+        cfg.models = cfg.models||[];
+        newModels.forEach(nm => {
+            if(!cfg.models.find(m=>m.name===nm.name)){
+                nm.endpoint_id = endpointId;
+                cfg.models.push(nm);
+                added++;
+            }
+        });
         renderAll();
-        toast('Scanned '+cfg.models.length+' models');
-      }catch(e){ toast('Scan failed'); }
-    });
+        toast('Scanned '+added+' new models');
+      }catch(e){ toast('Scan failed: '+e.message); }
+    }
 
     // Init
   loadState().then(loadCfg).then(refreshStatus);

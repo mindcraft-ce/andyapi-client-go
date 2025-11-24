@@ -11,15 +11,29 @@ heartbeat_interval: 30
 # Reconnect backoff seconds (max)
 reconnect_max_backoff: 30
 
+# Local OpenAI-compatible endpoints
+endpoints:
+  - id: "ollama"
+    url: "http://localhost:11434"
+    api_key: ""
+  - id: "vllm"
+    url: "http://localhost:8000"
+    api_key: "sk-..."
+
 # Models this client provides. Each model has its own concurrency, context length and capabilities.
 models:
   - name: "local-7b-chat"
+    internal_id: "llama3:latest"
+    endpoint_id: "ollama"
+    system_prompt: "You are a helpful assistant."
     max_completion_tokens: 4096
     concurrent_connections: 4
     supports_embedding: false
     supports_vision: false
     fallback: false
   - name: "vision-multimodal-13b"
+    internal_id: "llava:13b"
+    endpoint_id: "ollama"
     max_completion_tokens: 8192
     concurrent_connections: 2
     supports_embedding: true

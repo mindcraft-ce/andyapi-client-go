@@ -24,8 +24,17 @@ import (
 
 // ---------- Config ----------
 
+type LocalEndpoint struct {
+	ID     string `yaml:"id" json:"id"`
+	URL    string `yaml:"url" json:"url"`
+	APIKey string `yaml:"api_key" json:"api_key"`
+}
+
 type ModelConfig struct {
 	Name                  string `yaml:"name" json:"name"`
+	InternalID            string `yaml:"internal_id" json:"internal_id"`
+	EndpointID            string `yaml:"endpoint_id" json:"endpoint_id"`
+	SystemPrompt          string `yaml:"system_prompt" json:"system_prompt"`
 	MaxCompletionTokens   int    `yaml:"max_completion_tokens" json:"max_completion_tokens"`
 	ConcurrentConnections int    `yaml:"concurrent_connections" json:"concurrent_connections"`
 	SupportsEmbedding     bool   `yaml:"supports_embedding" json:"supports_embedding"`
@@ -46,9 +55,10 @@ type Config struct {
 	HeartbeatInterval int           `yaml:"heartbeat_interval" json:"heartbeat_interval"`
 	ReconnectMaxBack  int           `yaml:"reconnect_max_backoff" json:"reconnect_max_backoff"`
 	// Local OpenAI-compatible provider (for scanning available models)
-	LocalAPIURL string `yaml:"local_api_url" json:"local_api_url"`
-	LocalAPIKey string `yaml:"local_api_key" json:"local_api_key"`
-	Models            []ModelConfig `yaml:"models" json:"models"`
+	LocalAPIURL string          `yaml:"local_api_url" json:"local_api_url"`
+	LocalAPIKey string          `yaml:"local_api_key" json:"local_api_key"`
+	Endpoints   []LocalEndpoint `yaml:"endpoints" json:"endpoints"`
+	Models      []ModelConfig   `yaml:"models" json:"models"`
 	LastClientID      string        `yaml:"last_client_id" json:"last_client_id"`
 }
 
@@ -91,6 +101,20 @@ func loadConfig(path string) (*Config, error) {
 	}
 	if c.ReconnectMaxBack <= 0 {
 		c.ReconnectMaxBack = 30
+	}
+	// Migration: if Endpoints empty but LocalAPIURL set, create default endpoint
+	if len(c.Endpoints) == 0 && c.LocalAPIURL != "" {
+		c.Endpoints = []LocalEndpoint{{
+			ID:     "default",
+			URL:    c.LocalAPIURL,
+			APIKey: c.LocalAPIKey,
+		}}
+		// Update models to use default endpoint if not set
+		for i := range c.Models {
+			if c.Models[i].EndpointID == "" {
+				c.Models[i].EndpointID = "default"
+			}
+		}
 	}
 	return c, nil
 }
@@ -312,18 +336,74 @@ func (pc *ProviderClient) handleRequest(msg WSMessage) {
 // callLocalCompletion sends a chat completion request to the configured local OpenAI-compatible API.
 func (pc *ProviderClient) callLocalCompletion(req LocalClientRequest) (string, error) {
 	pc.mu.RLock()
-	base := strings.TrimSpace(pc.cfg.LocalAPIURL)
-	key := strings.TrimSpace(pc.cfg.LocalAPIKey)
+	cfg := pc.cfg
 	pc.mu.RUnlock()
-	if base == "" {
-		return "", fmt.Errorf("local_api_url not configured")
+
+	var endpointURL, endpointKey, modelID string
+
+	// Find model config
+	var modelCfg *ModelConfig
+	for i := range cfg.Models {
+		if cfg.Models[i].Name == req.Model {
+			modelCfg = &cfg.Models[i]
+			break
+		}
 	}
-	for strings.HasSuffix(base, "/") { base = strings.TrimSuffix(base, "/") }
+
+	if modelCfg != nil {
+		// Determine Endpoint
+		if modelCfg.EndpointID != "" {
+			for _, ep := range cfg.Endpoints {
+				if ep.ID == modelCfg.EndpointID {
+					endpointURL = ep.URL
+					endpointKey = ep.APIKey
+					break
+				}
+			}
+		}
+		// Determine Model ID (Internal vs External)
+		if modelCfg.InternalID != "" {
+			modelID = modelCfg.InternalID
+		} else {
+			modelID = modelCfg.Name
+		}
+	} else {
+		modelID = req.Model
+	}
+
+	// Fallback to legacy/default if no endpoint found
+	if endpointURL == "" {
+		endpointURL = cfg.LocalAPIURL
+		endpointKey = cfg.LocalAPIKey
+	}
+
+	if endpointURL == "" && len(cfg.Endpoints) > 0 {
+		// Fallback to first endpoint if available
+		endpointURL = cfg.Endpoints[0].URL
+		endpointKey = cfg.Endpoints[0].APIKey
+	}
+
+	base := strings.TrimSpace(endpointURL)
+	key := strings.TrimSpace(endpointKey)
+
+	if base == "" {
+		return "", fmt.Errorf("no endpoint configured for model %s", req.Model)
+	}
+	for strings.HasSuffix(base, "/") {
+		base = strings.TrimSuffix(base, "/")
+	}
 	url := base + "/v1/chat/completions"
+
+	messages := []map[string]string{}
+	if modelCfg != nil && modelCfg.SystemPrompt != "" {
+		messages = append(messages, map[string]string{"role": "system", "content": modelCfg.SystemPrompt})
+	}
+	messages = append(messages, map[string]string{"role": "user", "content": req.Prompt})
+
 	// Minimal OpenAI format
 	payload := map[string]interface{}{
-		"model": req.Model,
-		"messages": []map[string]string{{"role":"user","content": req.Prompt}},
+		"model":    modelID,
+		"messages": messages,
 	}
 	// ensure max_tokens included only if > 0
 	if req.MaxCompletionTokens > 0 {
@@ -332,19 +412,35 @@ func (pc *ProviderClient) callLocalCompletion(req LocalClientRequest) (string, e
 	body, _ := json.Marshal(payload)
 	httpReq, _ := http.NewRequest("POST", url, bytes.NewReader(body))
 	httpReq.Header.Set("Content-Type", "application/json")
-	if key != "" { httpReq.Header.Set("Authorization", "Bearer "+key) }
-	client := &http.Client{ Timeout: 60 * time.Second }
+	if key != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+key)
+	}
+	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(httpReq)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		var slurp struct{ Error interface{} `json:"error"` }
+		var slurp struct {
+			Error interface{} `json:"error"`
+		}
 		_ = json.NewDecoder(resp.Body).Decode(&slurp)
 		return "", fmt.Errorf("local api status %s: %v", resp.Status, slurp.Error)
 	}
-	var out struct{ Choices []struct{ Message struct{ Content string `json:"content"` } `json:"message"` } `json:"choices"` }
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil { return "", err }
-	if len(out.Choices) == 0 { return "", fmt.Errorf("no choices") }
+	var out struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	if len(out.Choices) == 0 {
+		return "", fmt.Errorf("no choices")
+	}
 	return out.Choices[0].Message.Content, nil
 }
 
@@ -491,6 +587,7 @@ func (pc *ProviderClient) startHTTP(addr string) {
 		pc.cfg.AndyAPIKey = newCfg.AndyAPIKey
 		pc.cfg.LocalAPIURL = newCfg.LocalAPIURL
 		pc.cfg.LocalAPIKey = newCfg.LocalAPIKey
+		pc.cfg.Endpoints = newCfg.Endpoints
 		pc.cfg.Provider = newCfg.Provider
 		pc.cfg.HeartbeatInterval = newCfg.HeartbeatInterval
 		pc.cfg.ReconnectMaxBack = newCfg.ReconnectMaxBack
