@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AndyAPI Local Client</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root{
       --bg:#0f1115;--panel:#141922;--muted:#94a3b8;--text:#e2e8f0;--primary:#3b82f6;--border:#233044;--accent:#22c55e;--warn:#f59e0b;--danger:#ef4444
@@ -27,7 +28,7 @@
     .panel{border:1px solid var(--border);border-radius:0 8px 8px 8px;background:#121722;padding:16px;margin-bottom:18px}
     .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
     label{font-size:12px;color:var(--muted)}
-    input,select{width:100%;margin-top:6px;padding:10px;background:#0f141d;border:1px solid var(--border);border-radius:8px;color:var(--text)}
+    input,select,textarea{width:100%;margin-top:6px;padding:10px;background:#0f141d;border:1px solid var(--border);border-radius:8px;color:var(--text)}
     table{width:100%;border-collapse:collapse}
     th,td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:left}
     th{font-size:12px;color:var(--muted);text-transform:uppercase}
@@ -35,6 +36,11 @@
     .chip{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border:1px solid var(--border);border-radius:999px;font-size:12px;color:var(--muted)}
     .toast{position:fixed;bottom:16px;right:16px;background:#1b2230;border:1px solid var(--border);padding:10px 12px;border-radius:8px;display:none}
     .hint{color:var(--muted);font-size:12px}
+    .stat-card{background:#0f141d;border:1px solid var(--border);border-radius:8px;padding:16px;text-align:center}
+    .stat-card .value{font-size:28px;font-weight:700;color:var(--text)}
+    .stat-card .label{font-size:12px;color:var(--muted);margin-top:4px}
+    .chart-container{position:relative;height:250px;margin-top:16px}
+    .stats-grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:16px}
   </style>
 </head>
 <body>
@@ -55,6 +61,7 @@
     <div class="tabs">
       <div class="tab active" data-tab="connection">Connection</div>
       <div class="tab" data-tab="models">Models</div>
+      <div class="tab" data-tab="stats">Statistics</div>
       <div class="tab" data-tab="about">About</div>
     </div>
 
@@ -79,11 +86,16 @@
           <label>Reconnect Max Backoff (sec)</label>
           <input id="reconnect" type="number" min="5" value="30">
         </div>
+        <div>
+          <label>Request Timeout (sec)</label>
+          <input id="request_timeout" type="number" min="10" value="60">
+          <div class="hint">Timeout for local API completion requests</div>
+        </div>
       </div>
 
       <h4 style="margin-top:20px;margin-bottom:10px">Local Endpoints</h4>
       <table id="endpointsTable">
-        <thead><tr><th>ID</th><th>URL</th><th>Key</th><th>Actions</th></tr></thead>
+        <thead><tr><th>ID</th><th>URL</th><th>Key</th><th>Headers</th><th>Actions</th></tr></thead>
         <tbody id="endpointsBody"></tbody>
       </table>
       <div class="row" style="margin-top:10px;align-items:flex-end">
@@ -150,6 +162,16 @@
           <div>
             <label><input id="m_vision" type="checkbox"> Supports Vision</label>
           </div>
+          <div style="grid-column: 1 / -1;">
+            <label>Extra Headers (JSON, optional)</label>
+            <input id="m_extra_headers" placeholder='{"X-Custom-Header": "value"}'>
+            <div class="hint">Model-specific headers override endpoint headers</div>
+          </div>
+          <div style="grid-column: 1 / -1;">
+            <label>Extra Params (JSON, optional)</label>
+            <input id="m_extra_params" placeholder='{"temperature": 0.7}'>
+            <div class="hint">Extra parameters to include in API requests</div>
+          </div>
         </div>
         <div class="row" style="margin-top:12px">
           <button id="btnSaveModel" class="btn primary">Save Model</button>
@@ -158,9 +180,97 @@
       </div>
     </section>
 
+    <section id="tab-stats" class="panel" style="display:none">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h3 style="margin:0">Statistics</h3>
+        <div class="row">
+          <button id="btnRefreshStats" class="btn">Refresh</button>
+          <button id="btnResetStats" class="btn danger">Reset Stats</button>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="value" id="statUptime">0s</div>
+          <div class="label">Uptime</div>
+        </div>
+        <div class="stat-card">
+          <div class="value" id="statTotal">0</div>
+          <div class="label">Total Requests</div>
+        </div>
+        <div class="stat-card">
+          <div class="value" id="statSuccess">0</div>
+          <div class="label">Successful</div>
+        </div>
+        <div class="stat-card">
+          <div class="value" id="statFailed">0</div>
+          <div class="label">Failed</div>
+        </div>
+        <div class="stat-card">
+          <div class="value" id="statSuccessRate">-</div>
+          <div class="label">Success Rate</div>
+        </div>
+      </div>
+
+      <div class="grid" style="grid-template-columns: 1fr 1fr;">
+        <div>
+          <h4>Requests Over Time (24h)</h4>
+          <div class="chart-container">
+            <canvas id="hourlyChart"></canvas>
+          </div>
+        </div>
+        <div>
+          <h4>Requests by Model</h4>
+          <div class="chart-container">
+            <canvas id="modelChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:20px">
+        <h4>Model Performance</h4>
+        <table id="modelStatsTable">
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Total</th>
+              <th>Success</th>
+              <th>Failed</th>
+              <th>Avg Duration</th>
+              <th>Tokens/sec</th>
+            </tr>
+          </thead>
+          <tbody id="modelStatsBody"></tbody>
+        </table>
+      </div>
+
+      <div style="margin-top:20px">
+        <h4>Recent Requests</h4>
+        <table id="recentRequestsTable">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Model</th>
+              <th>Duration</th>
+              <th>Tokens In/Out</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="recentRequestsBody"></tbody>
+        </table>
+      </div>
+    </section>
+
     <section id="tab-about" class="panel" style="display:none">
       <h3>About</h3>
       <p class="hint">This client connects your local/provider models to the Andy API server via WebSocket and exposes a small UI to manage configuration.</p>
+      <h4>Features</h4>
+      <ul class="hint">
+        <li>Request timeout configuration</li>
+        <li>Config hot reload (changes detected every 5 seconds)</li>
+        <li>Extra headers/params per endpoint or per model</li>
+        <li>Local statistics with charts</li>
+      </ul>
     </section>
   </main>
   <div id="toast" class="toast"></div>
@@ -174,12 +284,14 @@
     document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
       document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
       t.classList.add('active');
-      ['connection','models','about'].forEach(name => hide($('#tab-'+name)));
+      ['connection','models','stats','about'].forEach(name => hide($('#tab-'+name)));
       show($('#tab-'+t.dataset.tab));
+      if(t.dataset.tab === 'stats') refreshStats();
     }));
 
     // State
     let cfg = null; let initial = false; let editIndex = -1;
+    let hourlyChart = null; let modelChart = null;
 
     function wsFrom(base){ if(!base) return ''; base = base.trim().replace(/\/$/,'');
       if(base.startsWith('ws')) return base.endsWith('/ws')?base:base+'/ws';
@@ -196,6 +308,7 @@
       $('#provider').value = cfg.provider||'';
       $('#heartbeat').value = cfg.heartbeat_interval||30;
       $('#reconnect').value = cfg.reconnect_max_backoff||30;
+      $('#request_timeout').value = cfg.request_timeout||60;
       $('#wsUrl').textContent = 'ws: '+ (cfg.andy_api_url? wsFrom(cfg.andy_api_url): 'ws://localhost:8080/ws');
 
       // Endpoints
@@ -204,9 +317,12 @@
       epBody.innerHTML = '';
       eps.forEach((ep,i)=>{
         const tr = document.createElement('tr');
+        const hasHeaders = ep.extra_headers && Object.keys(ep.extra_headers).length > 0;
         tr.innerHTML = `<td>${ep.id}</td><td>${ep.url}</td><td>${ep.api_key?'***':''}</td>
+          <td>${hasHeaders ? '✔' : ''}</td>
           <td>
             <button class="btn" data-scan-ep="${i}">Scan</button>
+            <button class="btn" data-edit-ep="${i}">Edit</button>
             <button class="btn danger" data-del-ep="${i}">Del</button>
           </td>`;
         epBody.appendChild(tr);
@@ -241,6 +357,16 @@
       const delEp = e.target.getAttribute('data-del-ep');
       if(delEp!==null){ cfg.endpoints.splice(parseInt(delEp),1); renderAll(); }
       
+      const editEp = e.target.getAttribute('data-edit-ep');
+      if(editEp!==null){
+        const ep = cfg.endpoints[parseInt(editEp)];
+        const headers = prompt('Extra Headers (JSON):', JSON.stringify(ep.extra_headers||{}));
+        if(headers !== null){
+          try { ep.extra_headers = JSON.parse(headers||'{}'); renderAll(); }
+          catch(e){ toast('Invalid JSON'); }
+        }
+      }
+      
       const scanEp = e.target.getAttribute('data-scan-ep');
       if(scanEp!==null){
           const ep = cfg.endpoints[parseInt(scanEp)];
@@ -259,7 +385,7 @@
         if(!id || !url) { toast('ID and URL required'); return; }
         cfg.endpoints = cfg.endpoints||[];
         if(cfg.endpoints.find(e=>e.id===id)){ toast('ID already exists'); return; }
-        cfg.endpoints.push({id, url, api_key: key});
+        cfg.endpoints.push({id, url, api_key: key, extra_headers: {}, extra_params: {}});
         $('#new_ep_id').value=''; $('#new_ep_url').value=''; $('#new_ep_key').value='';
         renderAll();
     };
@@ -285,12 +411,25 @@
       $('#m_cc').value = m?.concurrent_connections||1;
       $('#m_embed').checked = !!m?.supports_embedding;
       $('#m_vision').checked = !!m?.supports_vision;
+      $('#m_extra_headers').value = m?.extra_headers ? JSON.stringify(m.extra_headers) : '';
+      $('#m_extra_params').value = m?.extra_params ? JSON.stringify(m.extra_params) : '';
       show($('#modelEditor')); 
     }
 
   // Adding is guided by scan; you can still edit scanned models below.
     $('#btnCancelModel').onclick = ()=>{ hide($('#modelEditor')); };
     $('#btnSaveModel').onclick = ()=>{
+      let extraHeaders = {};
+      let extraParams = {};
+      try {
+        const h = $('#m_extra_headers').value.trim();
+        if(h) extraHeaders = JSON.parse(h);
+      } catch(e) { toast('Invalid extra headers JSON'); return; }
+      try {
+        const p = $('#m_extra_params').value.trim();
+        if(p) extraParams = JSON.parse(p);
+      } catch(e) { toast('Invalid extra params JSON'); return; }
+
       const m = {
         name: $('#m_name').value.trim(),
         internal_id: $('#m_internal_id').value.trim(),
@@ -301,6 +440,8 @@
         supports_embedding: $('#m_embed').checked,
         supports_vision: $('#m_vision').checked,
         enabled: (editIndex===-1 ? false : !!cfg.models[editIndex]?.enabled),
+        extra_headers: extraHeaders,
+        extra_params: extraParams,
       };
       if(!m.name){ toast('Model name required'); return; }
       if(editIndex===-1){ cfg.models = cfg.models||[]; cfg.models.push(m); } else { cfg.models[editIndex]=m; }
@@ -315,6 +456,7 @@
           provider: $('#provider').value.trim()||'provider',
           heartbeat_interval: parseInt($('#heartbeat').value||'30'),
           reconnect_max_backoff: parseInt($('#reconnect').value||'30'),
+          request_timeout: parseInt($('#request_timeout').value||'60'),
           endpoints: cfg.endpoints||[],
           models: cfg.models||[],
         };
@@ -355,8 +497,6 @@
     // Scan models from local OpenAI-compatible API via server proxy (avoids CORS)
     const scanBtn = document.getElementById('btnScanModels');
     if (scanBtn) scanBtn.addEventListener('click', async ()=>{
-        // Legacy scan button - maybe remove or make it scan all?
-        // For now, let's just toast
         toast('Please use Scan button in Endpoints table');
     });
 
@@ -373,6 +513,8 @@
         newModels.forEach(nm => {
             if(!cfg.models.find(m=>m.name===nm.name)){
                 nm.endpoint_id = endpointId;
+                nm.extra_headers = {};
+                nm.extra_params = {};
                 cfg.models.push(nm);
                 added++;
             }
@@ -381,6 +523,121 @@
         toast('Scanned '+added+' new models');
       }catch(e){ toast('Scan failed: '+e.message); }
     }
+
+    // Statistics
+    function formatDuration(seconds){
+      if(seconds < 60) return Math.round(seconds) + 's';
+      if(seconds < 3600) return Math.round(seconds/60) + 'm';
+      if(seconds < 86400) return Math.round(seconds/3600) + 'h';
+      return Math.round(seconds/86400) + 'd';
+    }
+
+    async function refreshStats(){
+      try{
+        const r = await fetch('/api/stats');
+        if(!r.ok) return;
+        const stats = await r.json();
+        
+        // Update summary cards
+        $('#statUptime').textContent = formatDuration(stats.uptime_seconds||0);
+        $('#statTotal').textContent = stats.total_requests||0;
+        $('#statSuccess').textContent = stats.successful_requests||0;
+        $('#statFailed').textContent = stats.failed_requests||0;
+        const total = stats.total_requests||0;
+        const success = stats.successful_requests||0;
+        $('#statSuccessRate').textContent = total > 0 ? Math.round(success/total*100)+'%' : '-';
+
+        // Update hourly chart
+        const hourlyData = stats.hourly_stats||[];
+        updateHourlyChart(hourlyData);
+
+        // Update model chart
+        const modelStats = stats.model_stats||{};
+        updateModelChart(modelStats);
+
+        // Update model stats table
+        const msBody = $('#modelStatsBody');
+        msBody.innerHTML = '';
+        Object.entries(modelStats).forEach(([model, ms])=>{
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${model}</td><td>${ms.total_requests}</td><td>${ms.successful_requests}</td>
+            <td>${ms.failed_requests}</td><td>${ms.avg_duration?.toFixed(2)||0}s</td>
+            <td>${ms.avg_tokens_per_second?.toFixed(1)||0}</td>`;
+          msBody.appendChild(tr);
+        });
+
+        // Update recent requests table
+        const rrBody = $('#recentRequestsBody');
+        rrBody.innerHTML = '';
+        const recent = (stats.recent_requests||[]).slice(-20).reverse();
+        recent.forEach(req=>{
+          const tr = document.createElement('tr');
+          const time = new Date(req.timestamp).toLocaleTimeString();
+          const status = req.success ? '<span style="color:var(--accent)">✔</span>' : '<span style="color:var(--danger)">✖</span>';
+          tr.innerHTML = `<td>${time}</td><td>${req.model}</td><td>${req.duration?.toFixed(2)||0}s</td>
+            <td>${req.tokens_in||0} / ${req.tokens_out||0}</td><td>${status}</td>`;
+          rrBody.appendChild(tr);
+        });
+      }catch(e){ console.error('Stats refresh error:', e); }
+    }
+
+    function updateHourlyChart(data){
+      const ctx = $('#hourlyChart').getContext('2d');
+      const labels = data.map(h => new Date(h.hour).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}));
+      const success = data.map(h => h.successful_requests||0);
+      const failed = data.map(h => h.failed_requests||0);
+
+      if(hourlyChart) hourlyChart.destroy();
+      hourlyChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            { label: 'Successful', data: success, backgroundColor: '#22c55e', stack: 'stack0' },
+            { label: 'Failed', data: failed, backgroundColor: '#ef4444', stack: 'stack0' }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { labels: { color: '#94a3b8' } } },
+          scales: {
+            x: { stacked: true, ticks: { color: '#94a3b8' }, grid: { color: '#233044' } },
+            y: { stacked: true, ticks: { color: '#94a3b8' }, grid: { color: '#233044' } }
+          }
+        }
+      });
+    }
+
+    function updateModelChart(modelStats){
+      const ctx = $('#modelChart').getContext('2d');
+      const labels = Object.keys(modelStats);
+      const data = Object.values(modelStats).map(m => m.total_requests||0);
+      const colors = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899'];
+
+      if(modelChart) modelChart.destroy();
+      if(labels.length === 0) return;
+      modelChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels,
+          datasets: [{ data, backgroundColor: colors.slice(0, labels.length) }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: 'right', labels: { color: '#94a3b8' } } }
+        }
+      });
+    }
+
+    $('#btnRefreshStats').onclick = refreshStats;
+    $('#btnResetStats').onclick = async ()=>{
+      if(!confirm('Reset all statistics?')) return;
+      await fetch('/api/stats/reset', {method:'POST'});
+      refreshStats();
+      toast('Statistics reset');
+    };
 
     // Init
   loadState().then(loadCfg).then(refreshStatus);
