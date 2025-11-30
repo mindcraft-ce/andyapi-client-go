@@ -780,7 +780,7 @@ func (pc *ProviderClient) callLocalCompletion(req LocalClientRequest) Completion
 	}
 	// ensure max_tokens included only if > 0
 	if req.MaxCompletionTokens > 0 {
-		payload["max_tokens"] = req.MaxCompletionTokens
+		payload["max_completion_tokens"] = req.MaxCompletionTokens
 	}
 
 	// Apply extra params from endpoint (base layer)
