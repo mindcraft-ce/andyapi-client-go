@@ -10,15 +10,31 @@ provider: "local-llm"
 heartbeat_interval: 30
 # Reconnect backoff seconds (max)
 reconnect_max_backoff: 30
+# Request timeout seconds (for local API completion requests)
+request_timeout: 60
 
 # Local OpenAI-compatible endpoints
 endpoints:
   - id: "ollama"
     url: "http://localhost:11434"
     api_key: ""
+    # Extra headers to add to all requests for this endpoint
+    extra_headers:
+      # X-Custom-Header: "value"
+    # Extra params to add to all request payloads for this endpoint
+    extra_params:
+      # temperature: 0.7
+    # Enable request/response logging for all models using this endpoint
+    enable_logging: false
+    # Log file path (JSONL format). Default: logs/requests.jsonl
+    log_file: "logs/ollama-requests.jsonl"
   - id: "vllm"
     url: "http://localhost:8000"
     api_key: "sk-..."
+    extra_headers: {}
+    extra_params: {}
+    enable_logging: false
+    log_file: ""
 
 # Models this client provides. Each model has its own concurrency, context length and capabilities.
 models:
@@ -31,6 +47,16 @@ models:
     supports_embedding: false
     supports_vision: false
     fallback: false
+    enabled: true
+    # Model-specific extra headers (override endpoint headers)
+    extra_headers: {}
+    # Model-specific extra params (override endpoint params)
+    extra_params:
+      temperature: 0.7
+    # Override endpoint logging settings for this model (null = inherit from endpoint)
+    enable_logging: true
+    # Override endpoint log file for this model (empty = inherit from endpoint)
+    log_file: "logs/llama3-requests.jsonl"
   - name: "vision-multimodal-13b"
     internal_id: "llava:13b"
     endpoint_id: "ollama"
@@ -39,3 +65,7 @@ models:
     supports_embedding: true
     supports_vision: true
     fallback: true
+    enabled: false
+    extra_headers: {}
+    extra_params: {}
+    # Inherits logging settings from endpoint when not specified

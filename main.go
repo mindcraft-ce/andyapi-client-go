@@ -25,22 +25,30 @@ import (
 // ---------- Config ----------
 
 type LocalEndpoint struct {
-	ID     string `yaml:"id" json:"id"`
-	URL    string `yaml:"url" json:"url"`
-	APIKey string `yaml:"api_key" json:"api_key"`
+	ID           string            `yaml:"id" json:"id"`
+	URL          string            `yaml:"url" json:"url"`
+	APIKey       string            `yaml:"api_key" json:"api_key"`
+	ExtraHeaders map[string]string `yaml:"extra_headers" json:"extra_headers"`
+	ExtraParams  map[string]interface{} `yaml:"extra_params" json:"extra_params"`
+	EnableLogging bool             `yaml:"enable_logging" json:"enable_logging"`
+	LogFile       string           `yaml:"log_file" json:"log_file"`
 }
 
 type ModelConfig struct {
-	Name                  string `yaml:"name" json:"name"`
-	InternalID            string `yaml:"internal_id" json:"internal_id"`
-	EndpointID            string `yaml:"endpoint_id" json:"endpoint_id"`
-	SystemPrompt          string `yaml:"system_prompt" json:"system_prompt"`
-	MaxCompletionTokens   int    `yaml:"max_completion_tokens" json:"max_completion_tokens"`
-	ConcurrentConnections int    `yaml:"concurrent_connections" json:"concurrent_connections"`
-	SupportsEmbedding     bool   `yaml:"supports_embedding" json:"supports_embedding"`
-	SupportsVision        bool   `yaml:"supports_vision" json:"supports_vision"`
-	Fallback              bool   `yaml:"fallback" json:"fallback"`
-	Enabled               bool   `yaml:"enabled" json:"enabled"`
+	Name                  string            `yaml:"name" json:"name"`
+	InternalID            string            `yaml:"internal_id" json:"internal_id"`
+	EndpointID            string            `yaml:"endpoint_id" json:"endpoint_id"`
+	SystemPrompt          string            `yaml:"system_prompt" json:"system_prompt"`
+	MaxCompletionTokens   int               `yaml:"max_completion_tokens" json:"max_completion_tokens"`
+	ConcurrentConnections int               `yaml:"concurrent_connections" json:"concurrent_connections"`
+	SupportsEmbedding     bool              `yaml:"supports_embedding" json:"supports_embedding"`
+	SupportsVision        bool              `yaml:"supports_vision" json:"supports_vision"`
+	Fallback              bool              `yaml:"fallback" json:"fallback"`
+	Enabled               bool              `yaml:"enabled" json:"enabled"`
+	ExtraHeaders          map[string]string `yaml:"extra_headers" json:"extra_headers"`
+	ExtraParams           map[string]interface{} `yaml:"extra_params" json:"extra_params"`
+	EnableLogging         *bool             `yaml:"enable_logging" json:"enable_logging"`         // nil = inherit from endpoint
+	LogFile               string            `yaml:"log_file" json:"log_file"`                     // empty = inherit from endpoint
 }
 
 type Config struct {
@@ -54,6 +62,7 @@ type Config struct {
 	Provider          string        `yaml:"provider" json:"provider"`
 	HeartbeatInterval int           `yaml:"heartbeat_interval" json:"heartbeat_interval"`
 	ReconnectMaxBack  int           `yaml:"reconnect_max_backoff" json:"reconnect_max_backoff"`
+	RequestTimeout    int           `yaml:"request_timeout" json:"request_timeout"` // seconds, default 60
 	// Local OpenAI-compatible provider (for scanning available models)
 	LocalAPIURL string          `yaml:"local_api_url" json:"local_api_url"`
 	LocalAPIKey string          `yaml:"local_api_key" json:"local_api_key"`
@@ -101,6 +110,9 @@ func loadConfig(path string) (*Config, error) {
 	}
 	if c.ReconnectMaxBack <= 0 {
 		c.ReconnectMaxBack = 30
+	}
+	if c.RequestTimeout <= 0 {
+		c.RequestTimeout = 60
 	}
 	// Migration: if Endpoints empty but LocalAPIURL set, create default endpoint
 	if len(c.Endpoints) == 0 && c.LocalAPIURL != "" {
@@ -166,6 +178,213 @@ type LocalClientResponse struct {
 	Error    int    `json:"error"`
 }
 
+// ---------- Statistics ----------
+
+type RequestStats struct {
+	Timestamp    time.Time `json:"timestamp"`
+	Model        string    `json:"model"`
+	Duration     float64   `json:"duration"`      // seconds
+	TokensIn     int       `json:"tokens_in"`     // estimated input tokens
+	TokensOut    int       `json:"tokens_out"`    // estimated output tokens
+	Success      bool      `json:"success"`
+	ErrorMessage string    `json:"error_message,omitempty"`
+}
+
+type ModelStats struct {
+	TotalRequests       int     `json:"total_requests"`
+	SuccessfulRequests  int     `json:"successful_requests"`
+	FailedRequests      int     `json:"failed_requests"`
+	TotalTokensIn       int     `json:"total_tokens_in"`
+	TotalTokensOut      int     `json:"total_tokens_out"`
+	TotalDuration       float64 `json:"total_duration"`
+	AvgDuration         float64 `json:"avg_duration"`
+	AvgTokensPerSecond  float64 `json:"avg_tokens_per_second"`
+}
+
+type Statistics struct {
+	mu              sync.RWMutex
+	RecentRequests  []RequestStats         `json:"recent_requests"`  // last 100 requests
+	ModelStats      map[string]*ModelStats `json:"model_stats"`
+	HourlyStats     []HourlyStat           `json:"hourly_stats"`     // last 24 hours
+	StartTime       time.Time              `json:"start_time"`
+	MaxRecentRequests int
+}
+
+type HourlyStat struct {
+	Hour            time.Time `json:"hour"`
+	TotalRequests   int       `json:"total_requests"`
+	SuccessfulReqs  int       `json:"successful_requests"`
+	FailedReqs      int       `json:"failed_requests"`
+	TotalTokensIn   int       `json:"total_tokens_in"`
+	TotalTokensOut  int       `json:"total_tokens_out"`
+	AvgDuration     float64   `json:"avg_duration"`
+}
+
+func NewStatistics() *Statistics {
+	return &Statistics{
+		RecentRequests:    make([]RequestStats, 0, 100),
+		ModelStats:        make(map[string]*ModelStats),
+		HourlyStats:       make([]HourlyStat, 0, 24),
+		StartTime:         time.Now(),
+		MaxRecentRequests: 100,
+	}
+}
+
+func (s *Statistics) RecordRequest(model string, duration float64, tokensIn, tokensOut int, success bool, errMsg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	req := RequestStats{
+		Timestamp:    now,
+		Model:        model,
+		Duration:     duration,
+		TokensIn:     tokensIn,
+		TokensOut:    tokensOut,
+		Success:      success,
+		ErrorMessage: errMsg,
+	}
+
+	// Add to recent requests (keep last 100)
+	s.RecentRequests = append(s.RecentRequests, req)
+	if len(s.RecentRequests) > s.MaxRecentRequests {
+		s.RecentRequests = s.RecentRequests[1:]
+	}
+
+	// Update model stats
+	if _, ok := s.ModelStats[model]; !ok {
+		s.ModelStats[model] = &ModelStats{}
+	}
+	ms := s.ModelStats[model]
+	ms.TotalRequests++
+	if success {
+		ms.SuccessfulRequests++
+	} else {
+		ms.FailedRequests++
+	}
+	ms.TotalTokensIn += tokensIn
+	ms.TotalTokensOut += tokensOut
+	ms.TotalDuration += duration
+	if ms.TotalRequests > 0 {
+		ms.AvgDuration = ms.TotalDuration / float64(ms.TotalRequests)
+		if ms.TotalDuration > 0 {
+			ms.AvgTokensPerSecond = float64(ms.TotalTokensOut) / ms.TotalDuration
+		}
+	}
+
+	// Update hourly stats
+	hourKey := now.Truncate(time.Hour)
+	var hourStat *HourlyStat
+	for i := range s.HourlyStats {
+		if s.HourlyStats[i].Hour.Equal(hourKey) {
+			hourStat = &s.HourlyStats[i]
+			break
+		}
+	}
+	if hourStat == nil {
+		// Clean old hours (keep 24)
+		cutoff := now.Add(-24 * time.Hour)
+		newHourly := make([]HourlyStat, 0, 24)
+		for _, h := range s.HourlyStats {
+			if h.Hour.After(cutoff) {
+				newHourly = append(newHourly, h)
+			}
+		}
+		newHourly = append(newHourly, HourlyStat{Hour: hourKey})
+		s.HourlyStats = newHourly
+		hourStat = &s.HourlyStats[len(s.HourlyStats)-1]
+	}
+	hourStat.TotalRequests++
+	if success {
+		hourStat.SuccessfulReqs++
+	} else {
+		hourStat.FailedReqs++
+	}
+	hourStat.TotalTokensIn += tokensIn
+	hourStat.TotalTokensOut += tokensOut
+	hourStat.AvgDuration = (hourStat.AvgDuration*float64(hourStat.TotalRequests-1) + duration) / float64(hourStat.TotalRequests)
+}
+
+func (s *Statistics) GetStats() map[string]interface{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	totalReqs := 0
+	totalSuccess := 0
+	totalFailed := 0
+	for _, ms := range s.ModelStats {
+		totalReqs += ms.TotalRequests
+		totalSuccess += ms.SuccessfulRequests
+		totalFailed += ms.FailedRequests
+	}
+
+	return map[string]interface{}{
+		"uptime_seconds":     time.Since(s.StartTime).Seconds(),
+		"total_requests":     totalReqs,
+		"successful_requests": totalSuccess,
+		"failed_requests":    totalFailed,
+		"recent_requests":    s.RecentRequests,
+		"model_stats":        s.ModelStats,
+		"hourly_stats":       s.HourlyStats,
+	}
+}
+
+// ---------- Request/Response Logging ----------
+
+type RequestLog struct {
+	Timestamp      time.Time              `json:"timestamp"`
+	RequestID      string                 `json:"request_id"`
+	Model          string                 `json:"model"`
+	InternalModel  string                 `json:"internal_model,omitempty"`
+	EndpointID     string                 `json:"endpoint_id,omitempty"`
+	Prompt         string                 `json:"prompt"`
+	SystemPrompt   string                 `json:"system_prompt,omitempty"`
+	ImageIncluded  bool                   `json:"image_included"`
+	MaxTokens      int                    `json:"max_tokens,omitempty"`
+	Response       string                 `json:"response"`
+	TokensIn       int                    `json:"tokens_in"`
+	TokensOut      int                    `json:"tokens_out"`
+	DurationMs     int64                  `json:"duration_ms"`
+	Success        bool                   `json:"success"`
+	ErrorMessage   string                 `json:"error_message,omitempty"`
+	ExtraParams    map[string]interface{} `json:"extra_params,omitempty"`
+}
+
+var logFileMu sync.Mutex
+
+func writeRequestLog(logFile string, entry RequestLog) error {
+	if logFile == "" {
+		return nil
+	}
+	logFileMu.Lock()
+	defer logFileMu.Unlock()
+
+	// Ensure directory exists
+	dir := filepath.Dir(logFile)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create log directory: %w", err)
+		}
+	}
+
+	// Open file in append mode, create if not exists
+	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open log file: %w", err)
+	}
+	defer f.Close()
+
+	// Write as JSONL (one JSON object per line)
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("failed to marshal log entry: %w", err)
+	}
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		return fmt.Errorf("failed to write log entry: %w", err)
+	}
+	return nil
+}
+
 // ---------- Runtime Client State ----------
 
 type ProviderClient struct {
@@ -180,13 +399,71 @@ type ProviderClient struct {
 	closed       bool
 	httpSrv      *http.Server
 	configPath   string
+	stats        *Statistics
+	configMtime  time.Time
 	initialSetup bool
 	connectCtx   context.Context
 	connectCancel context.CancelFunc
 }
 
 func NewProviderClient(cfg *Config, configPath string, initial bool) *ProviderClient {
-	return &ProviderClient{cfg: cfg, closing: make(chan struct{}), configPath: configPath, initialSetup: initial}
+	pc := &ProviderClient{
+		cfg:          cfg,
+		closing:      make(chan struct{}),
+		configPath:   configPath,
+		initialSetup: initial,
+		stats:        NewStatistics(),
+	}
+	// Get initial mtime for hot reload
+	if info, err := os.Stat(configPath); err == nil {
+		pc.configMtime = info.ModTime()
+	}
+	return pc
+}
+
+// watchConfig periodically checks for config file changes and reloads
+func (pc *ProviderClient) watchConfig() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-pc.closing:
+			return
+		case <-ticker.C:
+			info, err := os.Stat(pc.configPath)
+			if err != nil {
+				continue
+			}
+			pc.mu.RLock()
+			mtime := pc.configMtime
+			pc.mu.RUnlock()
+
+			if info.ModTime().After(mtime) {
+				log.Printf("Config file changed, reloading...")
+				newCfg, err := loadConfig(pc.configPath)
+				if err != nil {
+					log.Printf("Failed to reload config: %v", err)
+					continue
+				}
+				pc.mu.Lock()
+				oldURL := pc.cfg.WSURL()
+				pc.cfg = newCfg
+				pc.configMtime = info.ModTime()
+				newURL := pc.cfg.WSURL()
+				pc.mu.Unlock()
+
+				log.Printf("Config reloaded successfully")
+
+				// If WS URL changed and we're connected, trigger reconnect
+				if oldURL != newURL && pc.connected {
+					log.Printf("WS URL changed, reconnecting...")
+					pc.StopConnect()
+					time.Sleep(100 * time.Millisecond)
+					pc.StartConnect()
+				}
+			}
+		}
+	}
 }
 
 // connect establishes WS connection with exponential backoff
@@ -313,6 +590,7 @@ func (pc *ProviderClient) readLoop(ctx context.Context) {
 }
 
 func (pc *ProviderClient) handleRequest(msg WSMessage) {
+	startTime := time.Now()
 	defer func(){
 		if r := recover(); r != nil {
 			log.Printf("panic in handleRequest: %v", r)
@@ -322,24 +600,85 @@ func (pc *ProviderClient) handleRequest(msg WSMessage) {
 	b, _ := json.Marshal(msg.Data)
 	_ = json.Unmarshal(b, &req)
 	// Forward to local OpenAI-compatible API using the requested model
-	respText, err := pc.callLocalCompletion(req)
-	if err != nil {
-		log.Printf("local completion error: %v", err)
+	result := pc.callLocalCompletion(req)
+	duration := time.Since(startTime)
+	
+	// Estimate input tokens (rough: ~4 chars per token)
+	tokensIn := len(req.Prompt) / 4
+	if tokensIn < 1 {
+		tokensIn = 1
+	}
+
+	// Handle logging if enabled
+	if result.EnableLogging && result.LogFile != "" {
+		logEntry := RequestLog{
+			Timestamp:     startTime,
+			RequestID:     msg.RequestID,
+			Model:         req.Model,
+			InternalModel: result.InternalModel,
+			EndpointID:    result.EndpointID,
+			Prompt:        req.Prompt,
+			SystemPrompt:  result.SystemPrompt,
+			ImageIncluded: req.ImageBase64 != "",
+			MaxTokens:     req.MaxCompletionTokens,
+			Response:      result.Response,
+			TokensIn:      tokensIn,
+			TokensOut:     result.TokensOut,
+			DurationMs:    duration.Milliseconds(),
+			Success:       result.Error == nil,
+			ExtraParams:   result.ExtraParams,
+		}
+		if result.Error != nil {
+			logEntry.ErrorMessage = result.Error.Error()
+		}
+		if err := writeRequestLog(result.LogFile, logEntry); err != nil {
+			log.Printf("Failed to write request log: %v", err)
+		}
+	}
+
+	if result.Error != nil {
+		log.Printf("local completion error: %v", result.Error)
+		pc.stats.RecordRequest(req.Model, duration.Seconds(), tokensIn, 0, false, result.Error.Error())
 		resp := LocalClientResponse{ID: req.ID, Response: "", Status: "error", Error: 1}
 		pc.writeJSON(WSMessage{Type: "response", RequestID: msg.RequestID, ClientID: pc.clientID, Data: resp, Timestamp: time.Now()})
 		return
 	}
-	resp := LocalClientResponse{ID: req.ID, Response: respText, Status: "ok", Error: 0}
+	
+	pc.stats.RecordRequest(req.Model, duration.Seconds(), tokensIn, result.TokensOut, true, "")
+	resp := LocalClientResponse{ID: req.ID, Response: result.Response, Status: "ok", Error: 0}
 	pc.writeJSON(WSMessage{Type: "response", RequestID: msg.RequestID, ClientID: pc.clientID, Data: resp, Timestamp: time.Now()})
 }
 
+// CompletionResult holds the result of a local completion call including metadata for logging
+type CompletionResult struct {
+	Response      string
+	TokensOut     int
+	Error         error
+	// Metadata for logging
+	InternalModel string
+	EndpointID    string
+	SystemPrompt  string
+	ExtraParams   map[string]interface{}
+	EnableLogging bool
+	LogFile       string
+}
+
 // callLocalCompletion sends a chat completion request to the configured local OpenAI-compatible API.
-func (pc *ProviderClient) callLocalCompletion(req LocalClientRequest) (string, error) {
+// Returns CompletionResult with response text, output tokens estimate, error, and logging metadata
+func (pc *ProviderClient) callLocalCompletion(req LocalClientRequest) CompletionResult {
 	pc.mu.RLock()
 	cfg := pc.cfg
 	pc.mu.RUnlock()
 
+	result := CompletionResult{}
+
 	var endpointURL, endpointKey, modelID string
+	var endpointHeaders map[string]string
+	var endpointParams map[string]interface{}
+	var modelHeaders map[string]string
+	var modelParams map[string]interface{}
+	var endpointEnableLogging bool
+	var endpointLogFile string
 
 	// Find model config
 	var modelCfg *ModelConfig
@@ -350,13 +689,20 @@ func (pc *ProviderClient) callLocalCompletion(req LocalClientRequest) (string, e
 		}
 	}
 
+	var endpoint *LocalEndpoint
 	if modelCfg != nil {
 		// Determine Endpoint
 		if modelCfg.EndpointID != "" {
-			for _, ep := range cfg.Endpoints {
-				if ep.ID == modelCfg.EndpointID {
-					endpointURL = ep.URL
-					endpointKey = ep.APIKey
+			for i := range cfg.Endpoints {
+				if cfg.Endpoints[i].ID == modelCfg.EndpointID {
+					endpoint = &cfg.Endpoints[i]
+					endpointURL = endpoint.URL
+					endpointKey = endpoint.APIKey
+					endpointHeaders = endpoint.ExtraHeaders
+					endpointParams = endpoint.ExtraParams
+					endpointEnableLogging = endpoint.EnableLogging
+					endpointLogFile = endpoint.LogFile
+					result.EndpointID = endpoint.ID
 					break
 				}
 			}
@@ -367,9 +713,14 @@ func (pc *ProviderClient) callLocalCompletion(req LocalClientRequest) (string, e
 		} else {
 			modelID = modelCfg.Name
 		}
+		modelHeaders = modelCfg.ExtraHeaders
+		modelParams = modelCfg.ExtraParams
+		result.SystemPrompt = modelCfg.SystemPrompt
 	} else {
 		modelID = req.Model
 	}
+
+	result.InternalModel = modelID
 
 	// Fallback to legacy/default if no endpoint found
 	if endpointURL == "" {
@@ -379,15 +730,37 @@ func (pc *ProviderClient) callLocalCompletion(req LocalClientRequest) (string, e
 
 	if endpointURL == "" && len(cfg.Endpoints) > 0 {
 		// Fallback to first endpoint if available
-		endpointURL = cfg.Endpoints[0].URL
-		endpointKey = cfg.Endpoints[0].APIKey
+		endpoint = &cfg.Endpoints[0]
+		endpointURL = endpoint.URL
+		endpointKey = endpoint.APIKey
+		endpointHeaders = endpoint.ExtraHeaders
+		endpointParams = endpoint.ExtraParams
+		endpointEnableLogging = endpoint.EnableLogging
+		endpointLogFile = endpoint.LogFile
+		result.EndpointID = endpoint.ID
+	}
+
+	// Determine logging settings (model overrides endpoint)
+	if modelCfg != nil && modelCfg.EnableLogging != nil {
+		result.EnableLogging = *modelCfg.EnableLogging
+	} else {
+		result.EnableLogging = endpointEnableLogging
+	}
+	if modelCfg != nil && modelCfg.LogFile != "" {
+		result.LogFile = modelCfg.LogFile
+	} else if endpointLogFile != "" {
+		result.LogFile = endpointLogFile
+	} else if result.EnableLogging {
+		// Default log file if logging enabled but no file specified
+		result.LogFile = "logs/requests.jsonl"
 	}
 
 	base := strings.TrimSpace(endpointURL)
 	key := strings.TrimSpace(endpointKey)
 
 	if base == "" {
-		return "", fmt.Errorf("no endpoint configured for model %s", req.Model)
+		result.Error = fmt.Errorf("no endpoint configured for model %s", req.Model)
+		return result
 	}
 	for strings.HasSuffix(base, "/") {
 		base = strings.TrimSuffix(base, "/")
@@ -407,18 +780,55 @@ func (pc *ProviderClient) callLocalCompletion(req LocalClientRequest) (string, e
 	}
 	// ensure max_tokens included only if > 0
 	if req.MaxCompletionTokens > 0 {
-		payload["max_tokens"] = req.MaxCompletionTokens
+		payload["max_completion_tokens"] = req.MaxCompletionTokens
 	}
+
+	// Apply extra params from endpoint (base layer)
+	for k, v := range endpointParams {
+		payload[k] = v
+	}
+	// Apply extra params from model (override layer - model takes priority)
+	for k, v := range modelParams {
+		payload[k] = v
+	}
+
+	// Collect merged extra params for logging (excluding messages and model)
+	mergedParams := make(map[string]interface{})
+	for k, v := range endpointParams {
+		mergedParams[k] = v
+	}
+	for k, v := range modelParams {
+		mergedParams[k] = v
+	}
+	if len(mergedParams) > 0 {
+		result.ExtraParams = mergedParams
+	}
+
 	body, _ := json.Marshal(payload)
 	httpReq, _ := http.NewRequest("POST", url, bytes.NewReader(body))
 	httpReq.Header.Set("Content-Type", "application/json")
 	if key != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+key)
 	}
-	client := &http.Client{Timeout: 60 * time.Second}
+
+	// Apply extra headers from endpoint (base layer)
+	for k, v := range endpointHeaders {
+		httpReq.Header.Set(k, v)
+	}
+	// Apply extra headers from model (override layer - model takes priority)
+	for k, v := range modelHeaders {
+		httpReq.Header.Set(k, v)
+	}
+
+	timeout := cfg.RequestTimeout
+	if timeout <= 0 {
+		timeout = 60
+	}
+	client := &http.Client{Timeout: time.Duration(timeout) * time.Second}
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return "", err
+		result.Error = err
+		return result
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -426,7 +836,8 @@ func (pc *ProviderClient) callLocalCompletion(req LocalClientRequest) (string, e
 			Error interface{} `json:"error"`
 		}
 		_ = json.NewDecoder(resp.Body).Decode(&slurp)
-		return "", fmt.Errorf("local api status %s: %v", resp.Status, slurp.Error)
+		result.Error = fmt.Errorf("local api status %s: %v", resp.Status, slurp.Error)
+		return result
 	}
 	var out struct {
 		Choices []struct {
@@ -434,14 +845,31 @@ func (pc *ProviderClient) callLocalCompletion(req LocalClientRequest) (string, e
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage struct {
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", err
+		result.Error = err
+		return result
 	}
 	if len(out.Choices) == 0 {
-		return "", fmt.Errorf("no choices")
+		result.Error = fmt.Errorf("no choices")
+		return result
 	}
-	return out.Choices[0].Message.Content, nil
+	
+	content := out.Choices[0].Message.Content
+	tokensOut := out.Usage.CompletionTokens
+	// Estimate if not provided
+	if tokensOut == 0 {
+		tokensOut = len(content) / 4
+		if tokensOut < 1 {
+			tokensOut = 1
+		}
+	}
+	result.Response = content
+	result.TokensOut = tokensOut
+	return result
 }
 
 func (pc *ProviderClient) writeJSON(v interface{}) {
@@ -488,6 +916,13 @@ func (pc *ProviderClient) startHTTP(addr string) {
 	r.GET("/config", func(c *gin.Context) { c.JSON(200, pc.cfg) })
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok", "client_id": pc.clientID, "ws_url": pc.cfg.WSURL()})
+	})
+	r.GET("/api/stats", func(c *gin.Context) {
+		c.JSON(200, pc.stats.GetStats())
+	})
+	r.POST("/api/stats/reset", func(c *gin.Context) {
+		pc.stats = NewStatistics()
+		c.JSON(200, gin.H{"ok": true})
 	})
 	r.GET("/api/status", func(c *gin.Context) {
 		pc.mu.RLock()
@@ -591,6 +1026,7 @@ func (pc *ProviderClient) startHTTP(addr string) {
 		pc.cfg.Provider = newCfg.Provider
 		pc.cfg.HeartbeatInterval = newCfg.HeartbeatInterval
 		pc.cfg.ReconnectMaxBack = newCfg.ReconnectMaxBack
+		pc.cfg.RequestTimeout = newCfg.RequestTimeout
 		pc.cfg.Models = newCfg.Models
 		pc.mu.Unlock()
 		if err := pc.saveConfig(""); err != nil {
@@ -717,7 +1153,7 @@ func main() {
 			log.Printf("config not found; starting in initial-setup mode")
 		} else {
 			// create minimal default
-			cfg = &Config{AndyAPIURL: "http://localhost:8080", Provider: "provider", HeartbeatInterval: 30, ReconnectMaxBack: 30}
+			cfg = &Config{AndyAPIURL: "http://localhost:8080", Provider: "provider", HeartbeatInterval: 30, ReconnectMaxBack: 30, RequestTimeout: 60}
 			initial = true
 			log.Printf("config & example missing; using defaults for initial setup")
 		}
@@ -732,6 +1168,10 @@ func main() {
 	_, cancel := context.WithCancel(context.Background())
 	// Do not autoconnect; UI will call /api/connect
 	client.startHTTP(*httpAddr)
+	
+	// Start config hot reload watcher
+	go client.watchConfig()
+	log.Printf("Management UI available at http://localhost%s/ui", *httpAddr)
 
 
 	ch := make(chan os.Signal, 1)

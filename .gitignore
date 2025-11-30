@@ -36,3 +36,5 @@ config.yaml
 # UI build outputs (if any)
 ui/node_modules/
 ui/dist/
+
+logs/
