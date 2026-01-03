@@ -1,0 +1,27 @@
+# Example configuration for andyapi provider client
+andy_api_url: "http://localhost:8080"
+# Client token for user authentication (obtain from AndyAPI admin panel -> Users)
+client_token: ""
+
+# Provider identification (purely informational for now)
+provider: "local-llm"
+
+# Heartbeat interval seconds
+heartbeat_interval: 30
+# Reconnect backoff seconds (max)
+reconnect_max_backoff: 30
+
+# Models this client provides. Each model has its own concurrency, context length and capabilities.
+models:
+  - name: "local-7b-chat"
+    max_completion_tokens: 4096
+    concurrent_connections: 4
+    supports_embedding: false
+    supports_vision: false
+    fallback: false
+  - name: "vision-multimodal-13b"
+    max_completion_tokens: 8192
+    concurrent_connections: 2
+    supports_embedding: true
+    supports_vision: true
+    fallback: true

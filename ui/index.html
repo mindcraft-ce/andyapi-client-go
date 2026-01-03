@@ -1,0 +1,989 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AndyAPI Local Client</title>
+  <style>
+    :root {
+      --bg: #0a0c10;
+      --panel: #12161e;
+      --panel-hover: #161b25;
+      --muted: #8b9cb3;
+      --text: #e8ecf4;
+      --text-dim: #c4cdd9;
+      --primary: #4f8ff7;
+      --primary-hover: #6ba0f9;
+      --border: #1e2736;
+      --border-focus: #3d5a80;
+      --accent: #34d399;
+      --warn: #fbbf24;
+      --danger: #f87171;
+      --shadow: rgba(0, 0, 0, 0.25);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    /* Header */
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: linear-gradient(180deg, rgba(18, 22, 30, 0.98) 0%, rgba(18, 22, 30, 0.95) 100%);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo-icon {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, var(--primary) 0%, #7c3aed 100%);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 14px;
+      color: white;
+    }
+
+    .title {
+      font-weight: 700;
+      font-size: 18px;
+      color: var(--text);
+      letter-spacing: -0.3px;
+    }
+
+    .status-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .pill {
+      padding: 6px 12px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: 12px;
+      color: var(--muted);
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .badge::before {
+      content: '';
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .badge.gray {
+      background: rgba(107, 114, 128, 0.15);
+      color: #9ca3af;
+      border: 1px solid rgba(107, 114, 128, 0.3);
+    }
+    .badge.gray::before { background: #6b7280; }
+
+    .badge.green {
+      background: rgba(52, 211, 153, 0.12);
+      color: #6ee7b7;
+      border: 1px solid rgba(52, 211, 153, 0.3);
+    }
+    .badge.green::before { background: var(--accent); }
+
+    .badge.red {
+      background: rgba(248, 113, 113, 0.12);
+      color: #fca5a5;
+      border: 1px solid rgba(248, 113, 113, 0.3);
+    }
+    .badge.red::before { background: var(--danger); }
+
+    .header-actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .btn:hover {
+      background: var(--panel-hover);
+      border-color: var(--border-focus);
+      color: var(--text);
+    }
+
+    .btn.primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: white;
+    }
+
+    .btn.primary:hover {
+      background: var(--primary-hover);
+      border-color: var(--primary-hover);
+    }
+
+    .btn.danger {
+      background: rgba(248, 113, 113, 0.15);
+      border-color: rgba(248, 113, 113, 0.3);
+      color: var(--danger);
+    }
+
+    .btn.danger:hover {
+      background: rgba(248, 113, 113, 0.25);
+      border-color: rgba(248, 113, 113, 0.5);
+    }
+
+    .btn.sm {
+      padding: 5px 10px;
+      font-size: 11px;
+      font-weight: 500;
+      border-radius: 6px;
+    }
+
+    /* Action buttons in table */
+    .action-btns {
+      display: flex;
+      gap: 6px;
+    }
+
+    /* Main Content */
+    main {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: -1px;
+    }
+
+    .tab {
+      padding: 12px 20px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--muted);
+      background: transparent;
+      border: 1px solid transparent;
+      border-bottom: none;
+      border-radius: 10px 10px 0 0;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .tab:hover {
+      color: var(--text-dim);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .tab.active {
+      color: var(--text);
+      background: var(--panel);
+      border-color: var(--border);
+    }
+
+    /* Panels */
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 0 12px 12px 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+
+    .panel h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 20px;
+      color: var(--text);
+    }
+
+    .panel h4 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: var(--text);
+    }
+
+    /* Form Grid */
+    .grid {
+      display: grid;
+      gap: 20px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-dim);
+    }
+
+    input, select {
+      padding: 12px 14px;
+      font-size: 14px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      transition: all 0.15s ease;
+    }
+
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(79, 143, 247, 0.15);
+    }
+
+    input::placeholder {
+      color: var(--muted);
+      opacity: 0.6;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    /* Table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+    }
+
+    th {
+      padding: 10px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--muted);
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+
+    td {
+      padding: 14px 12px;
+      font-size: 13px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-dim);
+    }
+
+    tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    td:first-child {
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    /* Checkbox */
+    input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+      accent-color: var(--primary);
+    }
+
+    /* Icon Buttons */
+    .icon-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .icon-btn:hover {
+      background: var(--panel-hover);
+      border-color: var(--border-focus);
+      color: var(--text);
+    }
+
+    .icon-btn.danger:hover {
+      background: rgba(248, 113, 113, 0.15);
+      border-color: rgba(248, 113, 113, 0.4);
+      color: var(--danger);
+    }
+
+    .icon-btn svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .action-cell {
+      display: flex;
+      gap: 6px;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      opacity: 0;
+      visibility: hidden;
+      transition: all 0.2s ease;
+    }
+
+    .modal-overlay.active {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .modal {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      width: 100%;
+      max-width: 500px;
+      margin: 20px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+      transform: scale(0.95) translateY(-10px);
+      transition: transform 0.2s ease;
+    }
+
+    .modal-overlay.active .modal {
+      transform: scale(1) translateY(0);
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+
+    .modal-header h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .modal-close {
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      border-radius: 6px;
+      transition: all 0.15s ease;
+    }
+
+    .modal-close:hover {
+      background: var(--panel-hover);
+      color: var(--text);
+    }
+
+    .modal-body {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 24px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* Row utilities */
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .row.between {
+      justify-content: space-between;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      padding: 14px 20px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 500;
+      box-shadow: 0 8px 32px var(--shadow);
+      display: none;
+      z-index: 1000;
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--muted);
+    }
+
+    .empty-state p {
+      font-size: 14px;
+    }
+
+    /* Feature badges in table */
+    .feature-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+
+    .feature-badge.active {
+      background: rgba(52, 211, 153, 0.15);
+      color: var(--accent);
+    }
+
+    .feature-badge.inactive {
+      color: var(--border);
+    }
+
+    /* About section */
+    .about-content {
+      color: var(--text-dim);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .about-content p {
+      margin-bottom: 12px;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: var(--bg);
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--border-focus);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <div class="logo">
+        <div class="logo-icon">A</div>
+        <div class="title">AndyAPI Client</div>
+      </div>
+      <div class="status-group">
+        <div id="statusBadge" class="badge gray">never connected</div>
+        <div id="clientId" class="pill">id: …</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button id="btnConnect" class="btn primary">Connect</button>
+      <button id="btnDisconnect" class="btn" style="display:none">Disconnect</button>
+      <button id="btnSave" class="btn primary">Save Config</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="tabs">
+      <div class="tab active" data-tab="connection">Connection</div>
+      <div class="tab" data-tab="models">Models</div>
+      <div class="tab" data-tab="about">About</div>
+    </div>
+
+    <section id="tab-connection" class="panel">
+      <h3>Connection Settings</h3>
+      <div class="grid">
+        <div class="form-group">
+          <label>Andy API Base URL</label>
+          <input id="andy_api_url" placeholder="https://andy.mindcraft-ce.com/api">
+          <div class="hint">WebSocket endpoint will be derived automatically</div>
+        </div>
+        <div class="form-group">
+          <label>Client Token</label>
+          <input id="client_token" type="password" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+          <div class="hint">Your authentication token from AndyAPI</div>
+        </div>
+        <div class="form-group">
+          <label>Provider Name</label>
+          <input id="provider" placeholder="my-local-llm">
+          <div class="hint">Identifier for your provider (default: local-llm)</div>
+        </div>
+        <div class="form-group">
+          <label>Local OpenAI API URL</label>
+          <input id="local_api_url" placeholder="http://localhost:11434">
+          <div class="hint">Your local LLM endpoint (without /v1)</div>
+        </div>
+        <div class="form-group">
+          <label>Local API Key</label>
+          <input id="local_api_key" type="password" placeholder="sk-...">
+          <div class="hint">Optional, if your local API requires authentication</div>
+        </div>
+        <div class="form-group">
+          <label>Heartbeat Interval (seconds)</label>
+          <input id="heartbeat" type="number" min="5" value="30">
+        </div>
+        <div class="form-group">
+          <label>Reconnect Max Backoff (seconds)</label>
+          <input id="reconnect" type="number" min="5" value="30">
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-models" class="panel" style="display:none">
+      <div class="row between">
+        <h3 style="margin:0">Available Models</h3>
+        <button id="btnScanModels" class="btn">Scan from Local API</button>
+      </div>
+
+      <div id="modelsEmpty" class="empty-state">
+        <p>No models configured yet.</p>
+        <p class="hint">Click "Scan from Local API" to auto-discover models from your local endpoint.</p>
+      </div>
+
+      <table id="modelsTable" style="display:none">
+        <thead>
+          <tr>
+            <th>Model Name</th>
+            <th>Context</th>
+            <th>Concurrency</th>
+            <th>Embed</th>
+            <th>Vision</th>
+            <th>Enabled</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="modelsBody"></tbody>
+      </table>
+
+    </section>
+
+    <!-- Model Editor Modal -->
+    <div id="modelModal" class="modal-overlay">
+      <div class="modal">
+        <div class="modal-header">
+          <h3 id="editorTitle">Edit Model</h3>
+          <button class="modal-close" id="btnCloseModal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Model Name</label>
+            <input id="m_name" placeholder="model-id">
+          </div>
+          <div class="form-group">
+            <label>Max Completion Tokens</label>
+            <input id="m_ctx" type="number" min="1" value="4096">
+          </div>
+          <div class="form-group">
+            <label>Concurrent Connections</label>
+            <input id="m_cc" type="number" min="1" value="1">
+          </div>
+          <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px">
+              <input id="m_embed" type="checkbox"> Supports Embedding
+            </label>
+          </div>
+          <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px">
+              <input id="m_vision" type="checkbox"> Supports Vision
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="btnCancelModel" class="btn">Cancel</button>
+          <button id="btnSaveModel" class="btn primary">Save Model</button>
+        </div>
+      </div>
+    </div>
+
+    <section id="tab-about" class="panel" style="display:none">
+      <h3>About AndyAPI Client</h3>
+      <div class="about-content">
+        <p>This client connects your local AI models to the AndyAPI server via WebSocket, allowing them to be accessed through a unified API endpoint.</p>
+        <p>Configure your local OpenAI-compatible API (such as Ollama, LM Studio, or vLLM), scan for available models, and connect to start serving requests.</p>
+        <p class="hint" style="margin-top:20px">Version 1.0.0 • Built with ❤️</p>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const $ = s => document.querySelector(s);
+    const show = el => el.style.display = '';
+    const hide = el => el.style.display = 'none';
+    const toast = (m) => { 
+      const t = $('#toast'); 
+      t.textContent = m; 
+      t.style.display = 'block'; 
+      setTimeout(() => t.style.display = 'none', 2500);
+    };
+
+    // Tabs
+    document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      ['connection', 'models', 'about'].forEach(name => hide($('#tab-' + name)));
+      show($('#tab-' + t.dataset.tab));
+    }));
+
+    // State
+    let cfg = null;
+    let initial = false;
+    let editIndex = -1;
+
+    function wsFrom(base) {
+      if (!base) return '';
+      base = base.trim().replace(/\/$/, '');
+      if (base.startsWith('ws')) return base.endsWith('/ws') ? base : base + '/ws';
+      if (base.startsWith('http://')) return 'ws://' + base.slice(7) + '/ws';
+      if (base.startsWith('https://')) return 'wss://' + base.slice(8) + '/ws';
+      return 'ws://' + base + '/ws';
+    }
+
+    async function loadState() {
+      try {
+        const r = await fetch('/api/state');
+        if (r.ok) {
+          const j = await r.json();
+          initial = j.initial_setup;
+        }
+      } catch (e) {}
+    }
+
+    async function loadCfg() {
+      const r = await fetch('/config');
+      cfg = await r.json();
+      renderAll();
+    }
+
+    function renderAll() {
+      // Connection
+      $('#andy_api_url').value = cfg.andy_api_url || '';
+      $('#client_token').value = cfg.client_token || '';
+      $('#provider').value = cfg.provider || '';
+      $('#heartbeat').value = cfg.heartbeat_interval || 30;
+      $('#reconnect').value = cfg.reconnect_max_backoff || 30;
+
+      // Local API fields
+      const elUrl = document.getElementById('local_api_url');
+      const elKey = document.getElementById('local_api_key');
+      if (elUrl) elUrl.value = cfg.local_api_url || '';
+      if (elKey) elKey.value = cfg.local_api_key || '';
+
+      // Models
+      const models = cfg.models || [];
+      const empty = $('#modelsEmpty');
+      const table = $('#modelsTable');
+      const body = $('#modelsBody');
+      body.innerHTML = '';
+
+      if (models.length === 0) {
+        show(empty);
+        hide(table);
+      } else {
+        hide(empty);
+        show(table);
+      }
+
+      models.forEach((m, i) => {
+        const tr = document.createElement('tr');
+        const enabled = m.enabled ? 'checked' : '';
+        tr.innerHTML = `
+          <td>${m.name || ''}</td>
+          <td>${m.max_completion_tokens || 0}</td>
+          <td>${m.concurrent_connections || 1}</td>
+          <td><span class="feature-badge ${m.supports_embedding ? 'active' : 'inactive'}">${m.supports_embedding ? '✓' : '–'}</span></td>
+          <td><span class="feature-badge ${m.supports_vision ? 'active' : 'inactive'}">${m.supports_vision ? '✓' : '–'}</span></td>
+          <td><input type="checkbox" data-enable="${i}" ${enabled}></td>
+          <td>
+            <div class="action-cell">
+              <button class="icon-btn" data-i="${i}" title="Edit">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+              </button>
+              <button class="icon-btn danger" data-del="${i}" title="Delete">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
+              </button>
+            </div>
+          </td>
+        `;
+        body.appendChild(tr);
+      });
+
+      // Client ID
+      fetch('/health').then(r => r.json()).then(h => {
+        $('#clientId').textContent = 'id: ' + (h.client_id || '…');
+      });
+    }
+
+    // Table actions
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-i]');
+      if (btn) {
+        editIndex = parseInt(btn.getAttribute('data-i'));
+        openEditor(cfg.models[editIndex]);
+      }
+      const delBtn = e.target.closest('[data-del]');
+      if (delBtn) {
+        const idx = parseInt(delBtn.getAttribute('data-del'));
+        cfg.models.splice(idx, 1);
+        renderAll();
+      }
+    });
+
+    document.addEventListener('change', (e) => {
+      const idx = e.target.getAttribute('data-enable');
+      if (idx !== null) {
+        const i = parseInt(idx);
+        cfg.models[i].enabled = !!e.target.checked;
+      }
+    });
+
+    function openEditor(m) {
+      $('#editorTitle').textContent = (editIndex === -1 ? 'New' : 'Edit') + ' Model';
+      $('#m_name').value = m?.name || '';
+      $('#m_ctx').value = m?.max_completion_tokens || 4096;
+      $('#m_cc').value = m?.concurrent_connections || 1;
+      $('#m_embed').checked = !!m?.supports_embedding;
+      $('#m_vision').checked = !!m?.supports_vision;
+      $('#modelModal').classList.add('active');
+    }
+
+    function closeModal() {
+      $('#modelModal').classList.remove('active');
+    }
+
+    $('#btnCancelModel').onclick = closeModal;
+    $('#btnCloseModal').onclick = closeModal;
+
+    // Close modal on overlay click
+    $('#modelModal').onclick = (e) => {
+      if (e.target === $('#modelModal')) closeModal();
+    };
+
+    $('#btnSaveModel').onclick = () => {
+      const m = {
+        name: $('#m_name').value.trim(),
+        max_completion_tokens: parseInt($('#m_ctx').value || '0'),
+        concurrent_connections: parseInt($('#m_cc').value || '1'),
+        supports_embedding: $('#m_embed').checked,
+        supports_vision: $('#m_vision').checked,
+        enabled: (editIndex === -1 ? false : !!cfg.models[editIndex]?.enabled),
+      };
+      if (!m.name) {
+        toast('Model name required');
+        return;
+      }
+      if (editIndex === -1) {
+        cfg.models = cfg.models || [];
+        cfg.models.push(m);
+      } else {
+        cfg.models[editIndex] = m;
+      }
+      closeModal();
+      renderAll();
+    };
+
+    // Save config
+    $('#btnSave').onclick = async () => {
+      try {
+        const payload = {
+          andy_api_url: $('#andy_api_url').value.trim(),
+          client_token: $('#client_token').value.trim(),
+          provider: $('#provider').value.trim() || 'provider',
+          heartbeat_interval: parseInt($('#heartbeat').value || '30'),
+          reconnect_max_backoff: parseInt($('#reconnect').value || '30'),
+          local_api_url: (document.getElementById('local_api_url')?.value || '').trim(),
+          local_api_key: (document.getElementById('local_api_key')?.value || '').trim(),
+          models: cfg.models || [],
+        };
+        const url = initial ? '/api/save-config' : '/api/update-config';
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error(await res.text());
+        initial = false;
+        cfg = payload;
+        toast('Configuration saved');
+      } catch (e) {
+        toast('Save failed');
+      }
+    };
+
+    // Connection controls
+    async function refreshStatus() {
+      try {
+        const r = await fetch('/api/status');
+        if (!r.ok) return;
+        const s = await r.json();
+        const badge = document.getElementById('statusBadge');
+        const idEl = document.getElementById('clientId');
+        const ever = !!s.ever_connected;
+        const conn = !!s.connected;
+        let cls = 'gray', text = 'never connected';
+        if (ever && conn) {
+          cls = 'green';
+          text = 'connected';
+        } else if (ever && !conn) {
+          cls = 'red';
+          text = 'disconnected';
+        }
+        badge.className = 'badge ' + cls;
+        badge.textContent = text;
+        idEl.textContent = 'id: ' + (s.client_id || '…');
+        // Toggle buttons
+        document.getElementById('btnConnect').style.display = conn ? 'none' : '';
+        document.getElementById('btnDisconnect').style.display = conn ? '' : 'none';
+      } catch (e) {}
+    }
+
+    document.getElementById('btnConnect').onclick = async () => {
+      await fetch('/api/connect', { method: 'POST' });
+      setTimeout(refreshStatus, 200);
+    };
+
+    document.getElementById('btnDisconnect').onclick = async () => {
+      await fetch('/api/disconnect', { method: 'POST' });
+      setTimeout(refreshStatus, 200);
+    };
+
+    setInterval(refreshStatus, 1500);
+
+    // Scan models
+    const scanBtn = document.getElementById('btnScanModels');
+    if (scanBtn) scanBtn.addEventListener('click', async () => {
+      const base = (document.getElementById('local_api_url')?.value || '').trim();
+      const key = (document.getElementById('local_api_key')?.value || '').trim();
+      if (!base) {
+        toast('Local API URL required');
+        return;
+      }
+      try {
+        const res = await fetch('/api/scan-models', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base_url: base, api_key: key })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        cfg.models = data.models || [];
+        renderAll();
+        toast('Found ' + cfg.models.length + ' models');
+      } catch (e) {
+        toast('Scan failed');
+      }
+    });
+
+    // Init
+    loadState().then(loadCfg).then(refreshStatus);
+  </script>
+</body>
+</html>

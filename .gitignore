@@ -1,0 +1,36 @@
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Binaries and local builds
+/dist/
+/build/
+
+# IDE/editor junk
+*.log
+*.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Dependency/tooling caches
+bin/
+vendor/
+.coverage/
+
+# OS files
+Thumbs.db
+
+# Local configuration (keep example tracked)
+config.yaml
+!config.example.yaml
+
+# UI build outputs (if any)
+ui/node_modules/
+ui/dist/
